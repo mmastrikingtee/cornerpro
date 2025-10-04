@@ -1,0 +1,9 @@
+﻿.venv/
+__pycache__/
+*.pyc
+data/*.sqlite
+data/*.db
+data/raw/
+models/challengers/
+site/public/api/*.json
+.vscode/
