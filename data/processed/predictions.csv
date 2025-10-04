@@ -1,0 +1,2 @@
+event_id,event_name,event_date,org,bout_id,a_id,b_id,a_name,b_name,weight,elo_a,elo_b,p_a,p_b,odds_a,odds_b
+ev_1,UFC Sample Card,2099-01-01,UFC,bt_1,f_a,f_b,Sample A,Sample B,MW,1500.0,1500.0,0.5,0.5,-100,-100

@@ -1,0 +1,20 @@
+[
+  {
+    "event_id": "ev_1",
+    "name": "UFC Sample Card",
+    "date": "2099-01-01",
+    "org": "UFC",
+    "fights": [
+      {
+        "bout_id": "bt_1",
+        "a": "Sample A",
+        "b": "Sample B",
+        "p_a": 0.5,
+        "p_b": 0.5,
+        "odds_a": -100,
+        "odds_b": -100,
+        "weight": "MW"
+      }
+    ]
+  }
+]

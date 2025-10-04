@@ -1,7 +1,7 @@
 ﻿from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from datetime import datetime
-import sqlite3, os, urllib.parse
+import sqlite3, os, urllib.parse, csv
 from src.config import DATABASE_URL
 
 def _db():
@@ -11,6 +11,16 @@ def _db():
 def slug(s): 
     return urllib.parse.quote(s.lower().replace(' ','-'))
 
+def load_predictions():
+    pred = {}
+    p = Path('data/processed/predictions.csv')
+    if not p.exists(): return pred
+    with p.open('r', encoding='utf-8') as f:
+        r = csv.DictReader(f)
+        for row in r:
+            pred[row['bout_id']] = row
+    return pred
+
 def build():
     out = Path('site/public'); out.mkdir(parents=True, exist_ok=True)
     env = Environment(loader=FileSystemLoader('site/templates'))
@@ -19,17 +29,33 @@ def build():
         env.get_template('index.html').render(timestamp=datetime.utcnow().isoformat()),
         encoding='utf-8'
     )
-    # one card from DB
+    # card page (first future event)
     con=_db(); cur=con.cursor()
     ev = cur.execute('SELECT event_id,org,event_date,name FROM events ORDER BY event_date LIMIT 1').fetchone()
+    preds = load_predictions()
     if ev:
         event_id, org, dt, name = ev
-        rows = cur.execute('SELECT fa.name, fb.name, b.weight_class \
+        rows = cur.execute('SELECT b.bout_id, fa.name, fb.name, b.weight_class \
                             FROM bouts b JOIN fighters fa ON fa.fighter_id=b.fighter_a_id \
                                           JOIN fighters fb ON fb.fighter_id=b.fighter_b_id \
                             WHERE b.event_id=?',[event_id]).fetchall()
-        rows = [ {'a_name':r[0], 'b_name':r[1], 'weight_class':r[2]} for r in rows ]
-        card_html = env.get_template('card.html').render(event_name=name, event_date=dt, rows=rows)
+        # enrich with predictions if available
+        out_rows = []
+        for (bout_id, a_name, b_name, weight) in rows:
+            pr = preds.get(bout_id, None)
+            if pr:
+                p_a = float(pr['p_a']); p_b = float(pr['p_b'])
+                odds_a = int(pr['odds_a']); odds_b = int(pr['odds_b'])
+            else:
+                p_a = p_b = 0.5; odds_a = odds_b = 100
+            out_rows.append({
+                'bout_id': bout_id,
+                'a_name': a_name, 'b_name': b_name,
+                'weight_class': weight,
+                'p_a': p_a, 'p_b': p_b,
+                'odds_a': odds_a, 'odds_b': odds_b
+            })
+        card_html = env.get_template('card.html').render(event_name=name, event_date=dt, rows=out_rows)
         card_dir = out / 'cards' / f"{dt}-{org.lower()}-{slug(name)}"
         card_dir.mkdir(parents=True, exist_ok=True)
         (card_dir/'index.html').write_text(card_html, encoding='utf-8')
