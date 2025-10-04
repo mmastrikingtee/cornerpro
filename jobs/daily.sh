@@ -1,6 +1,6 @@
-﻿set -euo pipefail
+set -euo pipefail
 
-python -m src.ingest.mma_ingest --days-ahead 120
+python -m src.ingest.mma_ingest --days-ahead 400 --max-events 20
 python -m src.features.elo
 python -m src.predict.score_upcoming
 python -m src.publish.build_site
