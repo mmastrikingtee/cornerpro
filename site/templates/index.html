@@ -6,6 +6,12 @@
 </head><body>
 <h1>CornerPro</h1>
 <p>Automated MMA/Boxing probabilities (demo)</p>
-<p><a href="cards/2099-01-01-ufc-sample-card/index.html">UFC Sample Card</a></p>
+
+{% if card_rel %}
+<p><a href="{{ card_rel }}">{{ event_name }}</a></p>
+{% else %}
+<p>No upcoming cards yet.</p>
+{% endif %}
+
 <p style="color:#666">Last updated: {{ timestamp }}</p>
 </body></html>

@@ -1,20 +1,22 @@
 ﻿from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from datetime import datetime
-import sqlite3, os, urllib.parse, csv
+import sqlite3, urllib.parse
 from src.config import DATABASE_URL
 
 def _db():
     db_path = DATABASE_URL.split('///',1)[1] if 'sqlite' in DATABASE_URL else './data/cornerpro.sqlite'
     return sqlite3.connect(db_path)
 
-def slug(s): 
+def slug(s: str):
     return urllib.parse.quote(s.lower().replace(' ','-'))
 
 def load_predictions():
+    import csv
     pred = {}
     p = Path('data/processed/predictions.csv')
-    if not p.exists(): return pred
+    if not p.exists(): 
+        return pred
     with p.open('r', encoding='utf-8') as f:
         r = csv.DictReader(f)
         for row in r:
@@ -24,22 +26,23 @@ def load_predictions():
 def build():
     out = Path('site/public'); out.mkdir(parents=True, exist_ok=True)
     env = Environment(loader=FileSystemLoader('site/templates'))
-    # index
-    (out/'index.html').write_text(
-        env.get_template('index.html').render(timestamp=datetime.utcnow().isoformat()),
-        encoding='utf-8'
-    )
-    # card page (first future event)
+
+    # Find the first future event to link from the homepage
     con=_db(); cur=con.cursor()
     ev = cur.execute('SELECT event_id,org,event_date,name FROM events ORDER BY event_date LIMIT 1').fetchone()
-    preds = load_predictions()
+
+    # Default values for homepage
+    card_rel = None
+    event_name = None
+
     if ev:
         event_id, org, dt, name = ev
+        # Build the card page
+        preds = load_predictions()
         rows = cur.execute('SELECT b.bout_id, fa.name, fb.name, b.weight_class \
                             FROM bouts b JOIN fighters fa ON fa.fighter_id=b.fighter_a_id \
                                           JOIN fighters fb ON fb.fighter_id=b.fighter_b_id \
                             WHERE b.event_id=?',[event_id]).fetchall()
-        # enrich with predictions if available
         out_rows = []
         for (bout_id, a_name, b_name, weight) in rows:
             pr = preds.get(bout_id, None)
@@ -59,6 +62,20 @@ def build():
         card_dir = out / 'cards' / f"{dt}-{org.lower()}-{slug(name)}"
         card_dir.mkdir(parents=True, exist_ok=True)
         (card_dir/'index.html').write_text(card_html, encoding='utf-8')
+
+        # Homepage needs a relative link to that card
+        card_rel = f"cards/{dt}-{org.lower()}-{slug(name)}/index.html"
+        event_name = name
+
+    # Build homepage with dynamic link
+    (out/'index.html').write_text(
+        env.get_template('index.html').render(
+            timestamp=datetime.utcnow().isoformat(),
+            card_rel=card_rel,
+            event_name=event_name
+        ),
+        encoding='utf-8'
+    )
     con.close()
 
 if __name__ == '__main__':
