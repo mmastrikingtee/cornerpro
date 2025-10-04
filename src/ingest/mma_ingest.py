@@ -22,32 +22,41 @@ def get(url: str):
     r.raise_for_status()
     return r
 
+def find_upcoming_table(soup: BeautifulSoup):
+    # try headline that contains Upcoming/Scheduled/Future events
+    for h in soup.select("h2, h3"):
+        txt = h.get_text(" ", strip=True).lower()
+        if any(k in txt for k in ["upcoming events", "scheduled events", "future events"]):
+            t = h.find_next("table", class_="wikitable")
+            if t: return t
+    # fallback: first wikitable with Date & Event headers
+    for t in soup.select("table.wikitable"):
+        ths = [th.get_text(strip=True).lower() for th in t.select("th")]
+        if "date" in ths and "event" in ths:
+            return t
+    return None
+
 def parse_event_table():
+    """Return DataFrame with columns: Date, Event, Location, Link."""
     r = get(WIKI_LIST)
     soup = BeautifulSoup(r.text, "lxml")
-    h2s = soup.select("h2")
-    idx = None
-    for i,h in enumerate(h2s):
-        if "Upcoming events" in h.get_text():
-            idx = i
-            break
-    if idx is None:
-        tables = pd.read_html(r.text)
-        for t in tables:
-            if {"Date","Event","Location"} <= set(t.columns):
-                df = t; break
-        else:
-            raise RuntimeError("Could not find events table")
-        df["Link"] = ""
-        return df
-    table = h2s[idx].find_next("table")
-    df = pd.read_html(str(table))[0]
-    links = []
-    for row in table.select("tr")[1:]:
-        a = row.select_one("a[href]")
-        links.append("https://en.wikipedia.org"+a["href"] if a else "")
-    df["Link"] = links
-    return df
+    table = find_upcoming_table(soup)
+    if table is None:
+        raise RuntimeError("Could not find Upcoming/Scheduled events table on Wikipedia.")
+    # Manually read rows to avoid pandas colspan/rowspan quirks
+    rows = []
+    for tr in table.select("tr")[1:]:
+        tds = tr.find_all("td")
+        if len(tds) < 3:   # need at least Date, Event, Location
+            continue
+        date_txt = tds[0].get_text(" ", strip=True)
+        event_cell = tds[1]
+        event_txt = event_cell.get_text(" ", strip=True)
+        link_el = event_cell.find("a", href=True)
+        link = ("https://en.wikipedia.org" + link_el["href"]) if link_el else ""
+        location_txt = tds[2].get_text(" ", strip=True)
+        rows.append({"Date": date_txt, "Event": event_txt, "Location": location_txt, "Link": link})
+    return pd.DataFrame(rows)
 
 def to_iso(date_str: str) -> str:
     try:
@@ -61,9 +70,12 @@ def upsert(con, table, rowdict, pk):
     vals = [rowdict[c] for c in cols]
     placeholders = ",".join(["?"]*len(cols))
     cur = con.cursor()
-    cur.execute(f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders}) "
-                f"ON CONFLICT({pk}) DO UPDATE SET " +
-                ",".join([f"{c}=excluded.{c}" for c in cols if c!=pk]), vals)
+    cur.execute(
+        f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT({pk}) DO UPDATE SET " +
+        ",".join([f"{c}=excluded.{c}" for c in cols if c != pk]),
+        vals
+    )
     con.commit()
 
 def ingest(days_ahead: int = 120, max_events: int = 5, polite_delay: float = 1.0):
@@ -102,54 +114,46 @@ def ingest(days_ahead: int = 120, max_events: int = 5, polite_delay: float = 1.0
             subsoup = BeautifulSoup(rr.text, "lxml")
             card_table = None
             for h in subsoup.select("h2, h3"):
-                if "Fight card" in h.get_text():
-                    tbl = h.find_next("table")
+                if "fight card" in h.get_text(" ", strip=True).lower():
+                    tbl = h.find_next("table", class_="wikitable")
                     if tbl: card_table = tbl; break
             if card_table is None:
                 for tbl in subsoup.select("table.wikitable"):
-                    ths = [th.get_text(strip=True) for th in tbl.select("th")]
-                    joined = " ".join(ths).lower()
-                    if ("weight" in joined) and ("vs" in joined or "fighter" in joined or "bout" in joined):
+                    ths = [th.get_text(strip=True).lower() for th in tbl.select("th")]
+                    joined = " ".join(ths)
+                    if ("weight" in joined.lower()) and (("vs" in joined.lower()) or ("fighter" in joined.lower()) or ("bout" in joined.lower())):
                         card_table = tbl; break
             if card_table is None:
                 continue
 
-            df = pd.read_html(str(card_table))[0]
-            cols = [c.lower().strip() for c in df.columns]
-            df.columns = cols
-            if "fighter 1" in cols and "fighter 2" in cols:
-                f1c, f2c = "fighter 1","fighter 2"
-            elif "fighter1" in cols and "fighter2" in cols:
-                f1c, f2c = "fighter1","fighter2"
-            elif "red corner" in cols and "blue corner" in cols:
-                f1c, f2c = "red corner","blue corner"
-            elif "bout" in cols:
-                names = df["bout"].astype(str).str.split(" vs ", n=1, expand=True)
-                df["fighter_a"] = names[0]; df["fighter_b"] = names[1]
-                f1c, f2c = "fighter_a","fighter_b"
-            else:
-                obj_cols = [c for c in cols if df[c].dtype=='O'][:2]
-                if len(obj_cols) >= 2: f1c, f2c = obj_cols[0], obj_cols[1]
-                else: continue
+            # parse fight rows
+            bouts = []
+            for tr in card_table.select("tr")[1:]:
+                tds = tr.find_all(["td","th"])
+                if len(tds) < 2: continue
+                cells = [td.get_text(" ", strip=True) for td in tds]
+                weight = ""
+                a = b = ""
+                if len(cells) >= 3:
+                    if any(k in cells[0].lower() for k in ["weight", "feather", "bantam", "fly", "heavy", "middle", "light", "welter", "catch"]):
+                        weight = cells[0]
+                        a, b = cells[1], cells[2] if len(cells) >= 3 else ("","")
+                    else:
+                        if " vs " in cells[0]:
+                            a, b = cells[0].split(" vs ", 1)
+                        else:
+                            a, b = cells[0], cells[1]
+                if a and b:
+                    bouts.append((a, b, weight))
 
-            wcol = None
-            for cand in ["weight class","division","weight","wt"]:
-                if cand in cols: wcol = cand; break
-
-            for _, r in df.iterrows():
-                a = str(r.get(f1c,"")).strip()
-                b = str(r.get(f2c,"")).strip()
-                if not a or not b or a == "-" or b == "-": continue
-                weight = str(r.get(wcol,"")).strip() if wcol else ""
+            for a, b, weight in bouts:
                 a_id = slug_fighter(a); b_id = slug_fighter(b)
-
                 upsert(con, "fighters", {
                     "fighter_id": a_id, "name": a, "dob": None, "stance": None, "height_cm": None, "reach_cm": None
                 }, "fighter_id")
                 upsert(con, "fighters", {
                     "fighter_id": b_id, "name": b, "dob": None, "stance": None, "height_cm": None, "reach_cm": None
                 }, "fighter_id")
-
                 bout_id = f"{event_id}_{a_id}_vs_{b_id}"
                 upsert(con, "bouts", {
                     "bout_id": bout_id,

@@ -1,14 +1,37 @@
 ﻿<!doctype html>
 <html><head><meta charset='utf-8'/><meta name='viewport' content='width=device-width,initial-scale=1'/>
 <title>UFC Sample Card</title>
-<style>body{font-family:system-ui,Arial;margin:24px} table{border-collapse:collapse} td,th{border:1px solid #ddd;padding:8px}</style>
+<style>
+ body{font-family:system-ui,Arial;margin:24px}
+ table{border-collapse:collapse;width:100%}
+ th,td{border:1px solid #ddd;padding:8px;text-align:left}
+ th{background:#f6f6f6}
+ .pct{font-variant-numeric: tabular-nums}
+ .fav{font-weight:600}
+ .small{color:#666}
+</style>
 </head><body>
 <h2>UFC Sample Card — 2099-01-01</h2>
 <table>
-<tr><th>Fighter A</th><th>Fighter B</th><th>Weight</th></tr>
+<tr>
+  <th>#</th><th>Fighter A</th><th>Fighter B</th>
+  <th>P(A)</th><th>P(B)</th>
+  <th>Fair A (US)</th><th>Fair B (US)</th>
+  <th>Weight</th>
+</tr>
 
-<tr><td>Sample A</td><td>Sample B</td><td>MW</td></tr>
+<tr>
+  <td>1</td>
+  <td class="fav">Sample A</td>
+  <td class="fav">Sample B</td>
+  <td class="pct">50.0%</td>
+  <td class="pct">50.0%</td>
+  <td>-100</td>
+  <td>-100</td>
+  <td>MW</td>
+</tr>
 
 </table>
+<p class="small">Probabilities from Elo baseline. Fair odds are the breakeven American odds implied by P.</p>
 <p><a href="../../index.html">Back</a></p>
 </body></html>
