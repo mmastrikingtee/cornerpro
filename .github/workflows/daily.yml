@@ -1,29 +1,31 @@
 ﻿name: daily
 on:
-  schedule: [{ cron: '0 6 * * *' }]   # every day 06:00 UTC
+  schedule: [{ cron: "0 6 * * *" }]  # 06:00 UTC daily
   workflow_dispatch:
-permissions: { contents: write }
+
 jobs:
   daily:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: pip install -r requirements.txt
-      - name: Seed + Build site
+        with: { python-version: "3.11" }
+
+      - name: Install deps
         run: |
-          python -m src.eval.seed_db
-          python -m src.publish.build_site
-      - name: Copy site to /docs for Pages
-        run: |
-          rm -rf docs || true
-          mkdir -p docs
-          cp -R site/public/* docs/
-      - name: Commit site
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run daily job
+        run: bash jobs/daily.sh
+
+      - name: Commit site & data
         run: |
           git config user.name "cornerpro-bot"
           git config user.email "bot@cornerpro"
-          git add docs || true
-          git commit -m "daily publish" || true
-          git push
+          git add docs data/processed site/public
+          git commit -m "daily: ingest + score + publish" || echo "nothing to commit"
+
+      - name: Push
+        run: git push
